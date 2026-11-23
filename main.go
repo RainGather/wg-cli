@@ -15,7 +15,14 @@ import (
 	"time"
 )
 
-const version = "0.1.0"
+const version = "0.2.0"
+
+func defaultConfigPath(executable, override string) string {
+	if override != "" {
+		return override
+	}
+	return filepath.Join(filepath.Dir(executable), "wg.conf")
+}
 
 func proxyEnv(env []string, url string) []string {
 	// Clear inherited bypasses and replace conflicting proxies in the child only.
@@ -37,21 +44,22 @@ func proxyEnv(env []string, url string) []string {
 func run(args []string, stderr io.Writer) int {
 	fs := flag.NewFlagSet("wg-cli", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	defaultPath := os.Getenv("WG_CLI_CONFIG")
-	if defaultPath == "" {
-		base := os.Getenv("XDG_CONFIG_HOME")
-		if base == "" {
-			home, _ := os.UserHomeDir()
-			base = filepath.Join(home, ".config")
-		}
-		defaultPath = filepath.Join(base, "wg-cli", "wg.conf")
+	executable, err := os.Executable()
+	if err != nil {
+		fmt.Fprintln(stderr, "wg-cli: locate executable:", err)
+		return 1
 	}
+	if resolved, err := filepath.EvalSymlinks(executable); err == nil {
+		executable = resolved
+	}
+	defaultPath := defaultConfigPath(executable, os.Getenv("WG_CLI_CONFIG"))
 	path := fs.String("c", defaultPath, "WireGuard configuration path")
+	configure := fs.Bool("config", false, "interactively create or import a WireGuard configuration")
 	dialAddress := fs.String("dial", "", "forward stdin/stdout to host:port through WireGuard (SSH ProxyCommand)")
 	check := fs.Bool("check", false, "validate configuration without connecting")
 	ver := fs.Bool("version", false, "print version")
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "Usage: wg-cli [-c wg.conf] [--] command [args...]\n       wg-cli [-c wg.conf] --dial host:port\n       wg-cli [-c wg.conf] --check\n\nRootless, temporary WireGuard HTTP/CONNECT proxy. Only proxy-aware traffic is routed.")
+		fmt.Fprintln(stderr, "Usage: wg-cli [-c wg.conf] [--] command [args...]\n       wg-cli [-c wg.conf] --config\n       wg-cli [-c wg.conf] --dial host:port\n       wg-cli [-c wg.conf] --check\n\nRootless, temporary WireGuard HTTP/CONNECT proxy. Only proxy-aware traffic is routed.")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -62,6 +70,17 @@ func run(args []string, stderr io.Writer) int {
 	}
 	if *ver {
 		fmt.Fprintln(stderr, "wg-cli", version)
+		return 0
+	}
+	if *configure {
+		if fs.NArg() != 0 || *check || *dialAddress != "" {
+			fmt.Fprintln(stderr, "wg-cli: --config cannot be combined with a command, --check or --dial")
+			return 2
+		}
+		if err := configureFile(*path, os.Stdin, stderr); err != nil {
+			fmt.Fprintln(stderr, "wg-cli:", err)
+			return 1
+		}
 		return 0
 	}
 	if fs.NArg() == 0 && !*check && *dialAddress == "" {
@@ -79,6 +98,9 @@ func run(args []string, stderr io.Writer) int {
 	f, err := os.Open(*path)
 	if err != nil {
 		fmt.Fprintln(stderr, "wg-cli:", err)
+		if errors.Is(err, os.ErrNotExist) {
+			fmt.Fprintf(stderr, "Create a configuration with: wg-cli -c %q --config\n", *path)
+		}
 		return 1
 	}
 	c, err := parseConfig(f)

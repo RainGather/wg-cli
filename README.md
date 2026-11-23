@@ -19,11 +19,10 @@ wg-cli embeds WireGuard and a TCP/IP stack, starts a temporary authenticated HTT
 Build `dist/wg-cli-android-arm64` using the instructions below, then copy it into Termux's private storage. Most current Android phones use arm64.
 
 ```sh
-mkdir -p "$PREFIX/bin" ~/.config/wg-cli
+mkdir -p "$PREFIX/bin"
 cp ./wg-cli-android-arm64 "$PREFIX/bin/wg-cli"
 chmod 755 "$PREFIX/bin/wg-cli"
-cp /path/to/your/wireguard.conf ~/.config/wg-cli/wg.conf
-chmod 600 ~/.config/wg-cli/wg.conf
+wg-cli --config
 wg-cli --check
 wg-cli curl https://api.ipify.org
 ```
@@ -38,10 +37,19 @@ Zero dependencies means no additional runtime components for wg-cli. Building fr
 wg-cli [-c wg.conf] [--] command [args...]
 wg-cli [-c wg.conf] --dial host:port
 wg-cli [-c wg.conf] --check
+wg-cli [-c wg.conf] --config
 wg-cli --version
 ```
 
-Configuration path precedence: `-c`, then `WG_CLI_CONFIG`, then `$XDG_CONFIG_HOME/wg-cli/wg.conf`, falling back to `~/.config/wg-cli/wg.conf`.
+Configuration path precedence: `-c`, then `WG_CLI_CONFIG`, then `wg.conf` beside the executable (after resolving symlinks). This is independent of your working directory; a binary installed as `$PREFIX/bin/wg-cli` defaults to `$PREFIX/bin/wg.conf`. Relative `-c` paths are resolved from the current working directory.
+
+`wg-cli --config` starts a wizard to import an existing file or enter settings for one peer. Private keys and preshared keys are hidden when typed in an interactive terminal. The wizard validates before saving, asks before replacing an existing file (default: no), and atomically saves with permissions `0600`. It does not test connectivity. To update a multi-peer setup, edit the file or import its revised version.
+
+```sh
+wg-cli --config                      # Configure wg.conf beside the executable
+wg-cli -c ~/work/wg.conf --config     # Configure a specific path
+wg-cli -c ~/work/wg.conf rclone lsd remote:
+```
 
 Put wg-cli options before the command; subsequent arguments pass through unchanged. To run multiple commands in one tunnel, use a foreground shell:
 
@@ -73,7 +81,7 @@ See the official [rclone proxy FAQ](https://rclone.org/faq/#can-i-use-rclone-wit
 SSH remotes such as `git@github.com:user/repo.git` do not use HTTP_PROXY. The `--dial` mode provides a bidirectional stream for SSH's ProxyCommand without requiring nc or proxychains:
 
 ```sh
-git -c core.sshCommand="ssh -o 'ProxyCommand=$PREFIX/bin/wg-cli -c $HOME/.config/wg-cli/wg.conf --dial %h:%p'" \
+git -c core.sshCommand="ssh -o 'ProxyCommand=$PREFIX/bin/wg-cli -c $PREFIX/bin/wg.conf --dial %h:%p'" \
   clone git@github.com:user/repo.git
 ```
 

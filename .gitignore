@@ -19,6 +19,7 @@ coverage.*
 *.pem
 *.p12
 *.pfx
+.wg-cli-*
 
 # Local editor, OS and agent state.
 .DS_Store

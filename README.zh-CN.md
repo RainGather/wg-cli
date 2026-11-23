@@ -19,18 +19,27 @@ wg-cli -c ~/my-wg.conf curl https://api.ipify.org
 先按下方步骤构建 `dist/wg-cli-android-arm64`，将它复制到手机 Termux 私有目录（多数手机是 arm64），然后执行：
 
 ```sh
-mkdir -p "$PREFIX/bin" ~/.config/wg-cli
+mkdir -p "$PREFIX/bin"
 cp ./wg-cli-android-arm64 "$PREFIX/bin/wg-cli"
 chmod 755 "$PREFIX/bin/wg-cli"
-cp /path/to/your/wireguard.conf ~/.config/wg-cli/wg.conf
-chmod 600 ~/.config/wg-cli/wg.conf
+wg-cli --config
 wg-cli --check
 wg-cli curl https://api.ipify.org
 ```
 
 不要从 Android 共享存储直接执行二进制；把文件复制到 Termux 私有目录。首次使用需要真实的服务端配置，仓库的 `examples/wg.conf` 只是占位模板。零依赖指运行时无需额外组件，源码构建需要 Go 和首次下载的模块依赖。
 
-配置路径优先级：`-c` → `WG_CLI_CONFIG` → `$XDG_CONFIG_HOME/wg-cli/wg.conf` → `~/.config/wg-cli/wg.conf`。工具选项放在命令之前，后续参数原样传给子命令：
+配置路径优先级：`-c` → `WG_CLI_CONFIG` → 可执行文件同目录下的 `wg.conf`（解析符号链接后的位置）。默认路径与当前工作目录无关；安装在 `$PREFIX/bin/wg-cli` 时，默认配置是 `$PREFIX/bin/wg.conf`。`-c` 的相对路径按当前工作目录解析。
+
+`wg-cli --config` 启动配置向导，可导入现有配置，或逐项填写单个 Peer 的参数。交互终端中私钥与预共享密钥输入不回显。保存前验证配置，覆盖已有文件需明确输入 `yes`（默认取消），以 `0600` 权限原子保存；不会测试连接。多 Peer 配置可直接编辑文件或重新导入。
+
+```sh
+wg-cli --config                      # 配置可执行文件同目录下的 wg.conf
+wg-cli -c ~/work/wg.conf --config     # 配置指定路径
+wg-cli -c ~/work/wg.conf rclone lsd remote:
+```
+
+工具选项放在命令之前，后续参数原样传给子命令：
 
 ```sh
 wg-cli -c ~/work.conf -- rclone sync ./data remote:data --progress
@@ -58,7 +67,7 @@ rclone 的代理行为见[官方 FAQ](https://rclone.org/faq/#can-i-use-rclone-w
 `git@github.com:...` 使用 SSH，不读取 HTTP_PROXY。`--dial` 提供 SSH ProxyCommand 所需的双向字节流，仍不需要 nc/proxychains。以下把当前的 wg-cli 路径及固定配置写进本次命令参数，没有修改全局 SSH 配置：
 
 ```sh
-git -c core.sshCommand="ssh -o 'ProxyCommand=$PREFIX/bin/wg-cli -c $HOME/.config/wg-cli/wg.conf --dial %h:%p'" \
+git -c core.sshCommand="ssh -o 'ProxyCommand=$PREFIX/bin/wg-cli -c $PREFIX/bin/wg.conf --dial %h:%p'" \
   clone git@github.com:user/repo.git
 ```
 
