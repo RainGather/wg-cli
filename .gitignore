@@ -1,0 +1,33 @@
+# Build outputs and test data.
+/dist/
+/bin/
+/wg-cli
+/wg-cli.exe
+*.test
+*.out
+coverage.*
+*.prof
+*.pprof
+
+# Local WireGuard configurations and credentials; retain the safe template.
+*.conf
+!examples/wg.conf
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+
+# Local editor, OS and agent state.
+.DS_Store
+._*
+Thumbs.db
+.idea/
+.vscode/
+.codex/
+.agents/
+*.swp
+*.swo
+*~
