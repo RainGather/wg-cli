@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"net"
-	"time"
 
 	"golang.zx2c4.com/wireguard/conn"
 	"golang.zx2c4.com/wireguard/device"
@@ -29,10 +28,6 @@ func openTunnel(c *config) (dialFunc, func(), error) {
 		dev.Close()
 		return nil, nil, err
 	}
-	dial := func(ctx context.Context, network, address string) (net.Conn, error) {
-		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		defer cancel()
-		return n.DialContext(ctx, network, address)
-	}
-	return dial, dev.Close, nil
+	router := &splitRouter{config: c, tunnel: n.DialContext, direct: (&net.Dialer{}).DialContext}
+	return router.DialContext, dev.Close, nil
 }

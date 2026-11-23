@@ -21,12 +21,11 @@ func TestConfig(t *testing.T) {
 		t.Fatalf("IPC conversion: %v", err)
 	}
 	for name, s := range map[string]string{
-		"private key":       strings.Replace(validConfig(), "PrivateKey = ", "PrivateKey = secret", 1),
-		"hook":              validConfig() + "PostUp = touch /tmp/no\n",
-		"dns outside route": strings.Replace(validConfig(), "0.0.0.0/0", "10.1.0.0/16", 1),
-		"endpoint":          strings.Replace(validConfig(), "127.0.0.1:51820", "host:70000", 1),
-		"missing DNS":       strings.Replace(validConfig(), "DNS = 10.0.0.1\n", "", 1),
-		"MTU":               strings.Replace(validConfig(), "DNS =", "MTU = 42\nDNS =", 1),
+		"private key": strings.Replace(validConfig(), "PrivateKey = ", "PrivateKey = secret", 1),
+		"hook":        validConfig() + "PostUp = touch /tmp/no\n",
+		"endpoint":    strings.Replace(validConfig(), "127.0.0.1:51820", "host:70000", 1),
+		"missing DNS": strings.Replace(validConfig(), "DNS = 10.0.0.1\n", "", 1),
+		"MTU":         strings.Replace(validConfig(), "DNS =", "MTU = 42\nDNS =", 1),
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := parseConfig(strings.NewReader(s)); err == nil {
@@ -35,6 +34,14 @@ func TestConfig(t *testing.T) {
 				t.Fatal("key disclosed")
 			}
 		})
+	}
+}
+
+func TestConfigAllowsDirectDNS(t *testing.T) {
+	s := strings.Replace(validConfig(), "0.0.0.0/0", "10.65.0.0/16", 1)
+	s = strings.Replace(s, "DNS = 10.0.0.1", "DNS = 223.5.5.5", 1)
+	if _, err := parseConfig(strings.NewReader(s)); err != nil {
+		t.Fatal(err)
 	}
 }
 

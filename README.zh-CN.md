@@ -58,7 +58,10 @@ wg-cli sh -c 'git -c http.proxy="$WG_CLI_PROXY" fetch'
 
 * 设置大小写 HTTP/HTTPS/ALL_PROXY 并清空子进程的 NO_PROXY，避免继承旧代理或绕过规则。代理地址也以 `WG_CLI_PROXY` 提供给显式代理选项。
 * 这是代理封装，不是强制网络隔离。忽略代理的程序、程序内绕过设置、本地地址的客户端自动绕过规则及独立的认证辅助程序仍可能直连。普通 UDP、ICMP/ping、HTTP/3 不受此 HTTP 代理接管；不提供 SOCKS 协议。
-* 代理自身所有上游连接只能从 WireGuard 网络栈发出，失败不会回退直连。HTTP 目标域名及 CONNECT 中传入的域名在隧道内解析；客户端自行预解析的域名不在此保证内。WireGuard 的 Endpoint 域名在建立隧道前通过系统解析；希望避免这次解析可填写 Endpoint IP。
+* 代理按目标 IP 分流：命中任一 Peer 的 `AllowedIPs` 时走 WireGuard，其他地址走系统网络。命中的 IP 连接失败时，不会把同一个 IP 改走直连。HTTP、CONNECT 及 `--dial` 均遵循此规则。
+* DNS 查询使用配置里的 DNS IP，并按相同规则分流：DNS 在 `AllowedIPs` 内走隧道，在范围外走系统网络。解析后，再按每个目标 IP 选择线路。一个 DNS 失败后可尝试下一个已配置的 DNS，各自按路由规则连接，不会回退到未配置的系统 DNS。范围外的 DNS 查询会暴露给直连网络；客户端自行解析的域名不受此规则控制。WireGuard Endpoint 域名仍通过系统解析，若不需要这次解析可填写 IP。
+
+例如，`AllowedIPs = 10.65.0.0/16`、`DNS = 223.5.5.5` 时，DNS 和公网目标走正常网络，`10.65.3.3` 走 WireGuard。希望所有对应地址均走隧道时，使用 `0.0.0.0/0`（IPv6 为 `::/0`）。此规则只适用于代理支持的连接，`ping` 仍不会被接管。
 
 rclone 的代理行为见[官方 FAQ](https://rclone.org/faq/#can-i-use-rclone-with-an-http-proxy)和[选项文档](https://rclone.org/docs/#http-proxy)；Git 的覆盖规则见[官方 http.proxy 文档](https://git-scm.com/docs/git-config#Documentation/git-config.txt-httpproxy)。
 
@@ -75,13 +78,13 @@ git -c core.sshCommand="ssh -o 'ProxyCommand=$PREFIX/bin/wg-cli -c $PREFIX/bin/w
 
 ## WireGuard 配置
 
-支持标准 `[Interface]` 和多个 `[Peer]`，包括 PrivateKey、Address、DNS、MTU、PublicKey、PresharedKey、Endpoint、AllowedIPs、PersistentKeepalive。必须设置 DNS 为隧道内可达的 IP，并使 AllowedIPs 包含它。DNS 不支持搜索域；缺少 DNS 时不会使用系统 DNS 作为目标解析回退。
+支持标准 `[Interface]` 和多个 `[Peer]`，包括 PrivateKey、Address、DNS、MTU、PublicKey、PresharedKey、Endpoint、AllowedIPs、PersistentKeepalive。DNS 至少包含一个 IP，可位于 AllowedIPs 之外并通过系统网络访问；范围内的 DNS 则需要兼容的隧道 Address 和服务端连通性。DNS 字段不支持搜索域；缺少 DNS 时会报错，不会回退到系统 DNS。
 
 保留 Address 的主机地址而非网段地址。ListenPort 接受但使用随机本地 UDP 端口，便于并发调用。MTU 范围为 1280–65535，默认 1420。PostUp/PostDown、路由表等 wg-quick 专属字段会报错，不会执行配置中的 shell 命令。需要从导出配置中移除不支持的字段。
 
-服务端须已配置你的公钥、客户端隧道地址及相应转发/NAT。AllowedIPs 限制了隧道可达目标；若希望所有代理目标均可访问，通常使用 `0.0.0.0/0`（IPv6 需同时配置 IPv6 地址及 `::/0`）。
+服务端须已配置你的公钥、客户端隧道地址及相应转发/NAT。AllowedIPs 选择走隧道的目标，其他目标走系统网络；若希望所有 IPv4 目标走隧道，使用 `0.0.0.0/0`（IPv6 需同时配置 IPv6 地址及 `::/0`）。
 
-`--check` 仅检查配置语法及 DNS 路由，不测试握手；握手按首个网络请求触发，上游连接超时为 30 秒。工具不打印私钥；临时代理仅监听 127.0.0.1，并要求随机认证。认证令牌在子进程环境中，同一 Termux 用户可读，因此不能用来隔离同 UID 的恶意程序。HTTPS 保留客户端到目标的端到端 TLS，无证书替换。
+`--check` 仅检查配置语法，不测试路由及握手；握手按首个网络请求触发，上游连接超时为 30 秒。工具不打印私钥；临时代理仅监听 127.0.0.1，并要求随机认证。认证令牌在子进程环境中，同一 Termux 用户可读，因此不能用来隔离同 UID 的恶意程序。HTTPS 保留客户端到目标的端到端 TLS，无证书替换。
 
 命令退出码原样返回。找不到命令返回 127，无法执行返回 126，工具错误返回 1，用法错误返回 2。收到 INT/TERM/HUP 时转发给直接子进程，3 秒后必要时强制结束该进程并清理隧道。请使用前台命令；主动脱离、后台运行的后代不属于生命周期管理范围，外层命令结束后也无法继续使用临时代理。
 
@@ -97,6 +100,6 @@ sh scripts/build.sh
 
 建议 Go 1.25 或更新版本。构建脚本输出 Android arm64 单文件及 SHA256SUMS。运行无需 Go、NDK 或共享库。amd64 和 32 位 Android 不在当前发布目标内。
 
-集成测试在本机创建两个真实 WireGuard 设备，通过 UDP 交换加密数据，在隧道内部署 DNS、HTTP、HTTPS 服务，验证 HTTP/CONNECT、代理认证及无直连回退。若本机安装 git/rclone，还会分别执行真实的 `git ls-remote` / `rclone lsf`；缺少时明确跳过。无需公网 VPN 凭据。Android 交叉编译通过不等同于真机验证，仍需用你的实际配置在 Termux 上验收。
+集成测试在本机创建两个真实 WireGuard 设备，通过 UDP 交换加密数据，在隧道内部署 DNS、HTTP、HTTPS 服务，验证 HTTP/CONNECT、代理认证、按 AllowedIPs 分流及命中地址失败不回退直连；DNS 测试覆盖直连和隧道两种线路。若本机安装 git/rclone，还会分别执行真实的 `git ls-remote` / `rclone lsf`；缺少时明确跳过。无需公网 VPN 凭据。Android 交叉编译通过不等同于真机验证，仍需用你的实际配置在 Termux 上验收。
 
 采用官方 [wireguard-go 用户态网络栈](https://git.zx2c4.com/wireguard-go/tree/tun/netstack)，模块版本固定在 go.mod/go.sum。项目代码采用 [MIT 许可证](LICENSE)，允许使用、修改和再分发；第三方组件保留各自许可证，详见 [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES)。构建时这些文件随二进制一起复制到 dist，分发二进制时请保留许可证文件。

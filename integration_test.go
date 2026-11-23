@@ -30,7 +30,7 @@ import (
 
 // Two actual WireGuard devices exchange encrypted UDP over loopback. The
 // upstream HTTP and DNS servers exist only inside the server's user-space stack.
-func testTunnel(t *testing.T) dialFunc {
+func testTunnel(t *testing.T, extraAllowed ...netip.Prefix) dialFunc {
 	t.Helper()
 	serverKey, err := ecdh.X25519().GenerateKey(rand.Reader)
 	if err != nil {
@@ -131,6 +131,7 @@ func testTunnel(t *testing.T) dialFunc {
 	go tlsSrv.Serve(tls.NewListener(tlsLn, tlsConfig))
 	t.Cleanup(func() { tlsSrv.Close() })
 	c := &config{private: hex.EncodeToString(clientKey.Bytes()), addresses: []netip.Addr{clientIP}, dns: []netip.Addr{serverIP}, mtu: 1420, peers: []peerConfig{{public: hex.EncodeToString(serverKey.PublicKey().Bytes()), endpoint: "127.0.0.1:" + port, allowed: []netip.Prefix{netip.PrefixFrom(serverIP, 32)}}}}
+	c.peers[0].allowed = append(c.peers[0].allowed, extraAllowed...)
 	dial, close, err := openTunnel(c)
 	if err != nil {
 		t.Fatal(err)
@@ -184,8 +185,24 @@ func TestWireGuardProxy(t *testing.T) {
 			t.Fatal(res.Status)
 		}
 	})
-	t.Run("failure has no direct fallback", func(t *testing.T) {
-		// A reachable host listener outside AllowedIPs must never receive a connection.
+	t.Run("outside AllowedIPs connects directly", func(t *testing.T) {
+		direct := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "direct-ok") }))
+		defer direct.Close()
+		tr := &http.Transport{Proxy: http.ProxyURL(u)}
+		defer tr.CloseIdleConnections()
+		res, err := (&http.Client{Transport: tr, Timeout: 3 * time.Second}).Get(direct.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		body, _ := io.ReadAll(res.Body)
+		if string(body) != "direct-ok" {
+			t.Fatalf("direct route: %s", body)
+		}
+	})
+	t.Run("covered IP failure has no direct fallback", func(t *testing.T) {
+		// A host listener inside AllowedIPs must not be reached through the host stack.
+		coveredDial := testTunnel(t, netip.MustParsePrefix("127.0.0.0/8"))
 		ln, err := net.Listen("tcp4", "127.0.0.1:0")
 		if err != nil {
 			t.Fatal(err)
@@ -193,7 +210,7 @@ func TestWireGuardProxy(t *testing.T) {
 		defer ln.Close()
 		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 		defer cancel()
-		if c, err := dial(ctx, "tcp", ln.Addr().String()); err == nil {
+		if c, err := coveredDial(ctx, "tcp", ln.Addr().String()); err == nil {
 			c.Close()
 			t.Fatal("unexpected direct fallback")
 		}

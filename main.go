@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-const version = "0.2.0"
+const version = "0.3.0"
 
 func defaultConfigPath(executable, override string) string {
 	if override != "" {
@@ -110,7 +110,7 @@ func run(args []string, stderr io.Writer) int {
 		return 1
 	}
 	if *check {
-		fmt.Fprintln(stderr, "WireGuard configuration OK (syntax and DNS routes; connection not tested)")
+		fmt.Fprintln(stderr, "WireGuard configuration OK (syntax only; connectivity not tested)")
 		return 0
 	}
 	dial, closeTunnel, err := openTunnel(c)

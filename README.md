@@ -72,7 +72,11 @@ wg-cli sets uppercase and lowercase HTTP/HTTPS/ALL_PROXY variables and clears NO
 
 This is a proxy wrapper, not enforced network isolation. Commands that ignore proxies, application bypass rules, clients that automatically bypass local addresses, and independent credential helpers may still connect directly. The proxy does not provide SOCKS or intercept arbitrary UDP, ICMP/ping, or HTTP/3.
 
-All upstream connections made by the proxy use the WireGuard stack, with no direct fallback. HTTP target names and hostnames received in CONNECT requests resolve inside the tunnel. Names resolved independently by the client are outside this guarantee. The WireGuard Endpoint hostname resolves through the host before tunnel startup; use an Endpoint IP to avoid that lookup.
+Connections are split by destination IP: addresses matching any peer's `AllowedIPs` use WireGuard; all other addresses use the system network. A failed connection to a matching IP never retries that IP directly. This applies to HTTP, CONNECT, and `--dial`.
+
+DNS queries use the configured DNS IPs, with the same routing rule: a DNS IP inside `AllowedIPs` is reached through WireGuard; one outside is reached directly. After resolution, each target IP is routed independently. If a configured DNS server fails, the next configured DNS server may be tried using its own route; there is no fallback to an unconfigured system DNS server. DNS outside `AllowedIPs` exposes queries to that network. Names independently resolved by the client are outside this policy. The WireGuard Endpoint hostname resolves through the host before tunnel startup; use an Endpoint IP to avoid that lookup.
+
+For example, with `AllowedIPs = 10.65.0.0/16` and `DNS = 223.5.5.5`, the DNS server and public destinations use the system network, while `10.65.3.3` uses WireGuard. Keep `0.0.0.0/0` (and `::/0` for IPv6) when you want all corresponding addresses to use WireGuard.
 
 See the official [rclone proxy FAQ](https://rclone.org/faq/#can-i-use-rclone-with-an-http-proxy), [rclone proxy options](https://rclone.org/docs/#http-proxy), and [Git proxy documentation](https://git-scm.com/docs/git-config#Documentation/git-config.txt-httpproxy).
 
@@ -91,13 +95,13 @@ Each SSH connection creates its own temporary tunnel; no outer wg-cli wrapper is
 
 Supports `[Interface]` and multiple `[Peer]` sections with PrivateKey, Address, DNS, MTU, PublicKey, PresharedKey, Endpoint, AllowedIPs, and PersistentKeepalive. Address retains the host IP from each CIDR.
 
-DNS must contain IP addresses reachable through AllowedIPs and compatible with the configured address families. Search domains are unsupported. Missing DNS causes a validation error rather than falling back to the system resolver for target names.
+DNS must contain at least one IP address; search domains in the DNS field are unsupported. DNS addresses outside AllowedIPs are allowed and use the system network. DNS inside AllowedIPs requires a compatible tunnel Address and a reachable server. Missing DNS causes a validation error rather than falling back to the system resolver for target names.
 
 ListenPort is accepted, but wg-cli always uses an ephemeral local UDP port for concurrent invocations. MTU defaults to 1420 and must be between 1280 and 65535. Unsupported wg-quick fields such as PostUp/PostDown or routing-table settings cause an error; configuration files never execute shell hooks.
 
-Your server must already have the client's public key, tunnel address, and forwarding/NAT configured. AllowedIPs controls which proxy targets are reachable. Full IPv4 egress typically uses `0.0.0.0/0`; IPv6 also needs an IPv6 Address and `::/0`.
+Your server must already have the client's public key, tunnel address, and forwarding/NAT configured. AllowedIPs selects which destinations use WireGuard; other destinations connect directly. Full IPv4 tunneling uses `0.0.0.0/0`; full IPv6 tunneling also needs an IPv6 Address and `::/0`.
 
-`--check` validates syntax and DNS routes only, without testing a handshake. Handshakes occur on demand when traffic starts. Upstream connection attempts time out after 30 seconds.
+`--check` validates syntax only, without testing routes or a handshake. Handshakes occur on demand when traffic starts. Upstream connection attempts time out after 30 seconds.
 
 The proxy listens only on 127.0.0.1 and requires random credentials passed in the child's environment. These credentials do not isolate hostile processes running as the same Termux user. HTTPS retains end-to-end TLS without certificate replacement. wg-cli does not print private keys.
 
@@ -121,7 +125,7 @@ sh scripts/build.sh
 
 The script cross-compiles an Android arm64 executable into `dist/`, copies license notices, and writes `dist/SHA256SUMS`. It uses `CGO_ENABLED=0` and needs no NDK. The executable requires no additional shared libraries; Android's system loader is used. Android amd64 and 32-bit targets are not currently published.
 
-Integration tests create two real WireGuard devices exchanging encrypted UDP over loopback, with DNS, HTTP, and HTTPS services inside the tunnel. They verify forwarding, authentication, no direct fallback, stdio forwarding, exit statuses, and proxy shutdown. With Git and rclone installed, tests also run real `git ls-remote` and `rclone lsf` commands; otherwise those cases are explicitly skipped. No public VPN credentials are needed. Tests require permission to bind local TCP/UDP sockets.
+Integration tests create two real WireGuard devices exchanging encrypted UDP over loopback, with DNS, HTTP, and HTTPS services inside the tunnel. They verify forwarding, authentication, split routing, no direct fallback for covered IPs, stdio forwarding, exit statuses, and proxy shutdown. DNS routing tests cover both direct and tunnel DNS. With Git and rclone installed, tests also run real `git ls-remote` and `rclone lsf` commands; otherwise those cases are explicitly skipped. No public VPN credentials are needed. Tests require permission to bind local TCP/UDP sockets.
 
 Local integration tests, race checks, and Android arm64 cross-compilation have passed. Physical Android device testing is still needed with your own configuration.
 

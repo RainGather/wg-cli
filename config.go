@@ -159,28 +159,21 @@ func parseConfig(r io.Reader) (*config, error) {
 		}
 	}
 	if len(c.dns) == 0 {
-		return nil, fmt.Errorf("DNS must contain an IP address reachable through AllowedIPs")
-	}
-	for _, dns := range c.dns {
-		reachable := false
-		for _, p := range c.peers {
-			for _, prefix := range p.allowed {
-				if prefix.Contains(dns) {
-					reachable = true
-				}
-			}
-		}
-		sameFamily := false
-		for _, a := range c.addresses {
-			if a.Is4() == dns.Is4() {
-				sameFamily = true
-			}
-		}
-		if !reachable || !sameFamily {
-			return nil, fmt.Errorf("DNS %s is not reachable with the configured Address and AllowedIPs", dns)
-		}
+		return nil, fmt.Errorf("DNS must contain at least one IP address")
 	}
 	return c, nil
+}
+
+func (c *config) usesTunnel(ip netip.Addr) bool {
+	ip = ip.Unmap().WithZone("")
+	for _, p := range c.peers {
+		for _, prefix := range p.allowed {
+			if prefix.Contains(ip) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (c *config) ipc() (string, error) {
