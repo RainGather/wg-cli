@@ -185,6 +185,18 @@ func TestWireGuardProxy(t *testing.T) {
 			t.Fatal(res.Status)
 		}
 	})
+	t.Run("closed port reports successful handshake", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		connection, err := dial(ctx, "tcp", "files.wg:65000")
+		if err == nil {
+			connection.Close()
+			t.Fatal("closed port accepted")
+		}
+		if !strings.Contains(err.Error(), "handshake succeeded") || !strings.Contains(err.Error(), "WireGuard route") {
+			t.Fatal(err)
+		}
+	})
 	t.Run("outside AllowedIPs connects directly", func(t *testing.T) {
 		direct := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "direct-ok") }))
 		defer direct.Close()

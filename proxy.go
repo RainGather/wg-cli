@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -20,9 +21,14 @@ type proxy struct {
 	mu        sync.Mutex
 	active    map[net.Conn]bool
 	closed    bool
+	errors    io.Writer
 }
 
 func startProxy(dial dialFunc) (string, func(), error) {
+	return startProxyWithErrors(dial, io.Discard)
+}
+
+func startProxyWithErrors(dial dialFunc, errors io.Writer) (string, func(), error) {
 	ln, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
 		return "", nil, err
@@ -33,7 +39,7 @@ func startProxy(dial dialFunc) (string, func(), error) {
 		return "", nil, err
 	}
 	token := base64.RawURLEncoding.EncodeToString(secret[:])
-	p := &proxy{dial: dial, token: token, active: make(map[net.Conn]bool)}
+	p := &proxy{dial: dial, token: token, active: make(map[net.Conn]bool), errors: errors}
 	p.transport = &http.Transport{DialContext: dial, Proxy: nil, ForceAttemptHTTP2: false, MaxIdleConns: 100, IdleConnTimeout: 90 * time.Second, TLSHandshakeTimeout: 30 * time.Second}
 	srv := &http.Server{Handler: p, ReadHeaderTimeout: 15 * time.Second, MaxHeaderBytes: 1 << 20}
 	go func() { _ = srv.Serve(ln) }()
@@ -48,6 +54,15 @@ func startProxy(dial dialFunc) (string, func(), error) {
 		p.mu.Unlock()
 	}
 	return "http://wg:" + token + "@" + ln.Addr().String(), close, nil
+}
+
+func (p *proxy) upstreamError(w http.ResponseWriter, err error) {
+	message := fmt.Sprintf("upstream connection failed: %v", err)
+	// CONNECT clients often discard the response body, so report on stderr too.
+	p.mu.Lock()
+	fmt.Fprintln(p.errors, "wg-cli:", message)
+	p.mu.Unlock()
+	http.Error(w, message, http.StatusBadGateway)
 }
 
 func stripHop(h http.Header) {
@@ -81,7 +96,7 @@ func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	stripHop(req.Header)
 	res, err := p.transport.RoundTrip(req)
 	if err != nil {
-		http.Error(w, "WireGuard upstream connection failed", 502)
+		p.upstreamError(w, err)
 		return
 	}
 	defer res.Body.Close()
@@ -102,7 +117,7 @@ func (p *proxy) connect(w http.ResponseWriter, r *http.Request) {
 	}
 	upstream, err := p.dial(r.Context(), "tcp", r.Host)
 	if err != nil {
-		http.Error(w, "WireGuard upstream connection failed", 502)
+		p.upstreamError(w, err)
 		return
 	}
 	defer upstream.Close()

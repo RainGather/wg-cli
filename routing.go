@@ -18,10 +18,17 @@ type splitRouter struct {
 func (r *splitRouter) dialIP(ctx context.Context, network string, ip netip.Addr, port string) (net.Conn, error) {
 	ip = ip.Unmap()
 	dial := r.direct
+	route := "direct"
 	if r.config.usesTunnel(ip) {
 		dial = r.tunnel
+		route = "WireGuard"
 	}
-	return dial(ctx, network, net.JoinHostPort(ip.String(), port))
+	address := net.JoinHostPort(ip.String(), port)
+	c, err := dial(ctx, network, address)
+	if err != nil {
+		return nil, fmt.Errorf("%s route to %s: %w", route, address, err)
+	}
+	return c, nil
 }
 
 func (r *splitRouter) lookup(ctx context.Context, network, host string) ([]netip.Addr, error) {

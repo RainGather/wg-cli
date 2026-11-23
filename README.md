@@ -105,6 +105,20 @@ Your server must already have the client's public key, tunnel address, and forwa
 
 The proxy listens only on 127.0.0.1 and requires random credentials passed in the child's environment. These credentials do not isolate hostile processes running as the same Termux user. HTTPS retains end-to-end TLS without certificate replacement. wg-cli does not print private keys.
 
+## Troubleshooting connections
+
+A proxy `502` means wg-cli could not reach the upstream service; it does not prove the WireGuard handshake succeeded. Connection failures are reported in the HTTP response and on stderr, including the selected route and underlying error. Tunnel failures also report whether the matching peer has completed a handshake, without printing keys.
+
+* **No successful handshake:** check the Endpoint, client/server keys, preshared key, server peer settings, and UDP reachability.
+* **Handshake succeeded, connection refused:** verify the target address and port and that a service is listening. A firewall can also reject the connection.
+* **Handshake succeeded, timeout:** check target availability, forwarding, firewall rules, and return routes. The message alone cannot identify which one failed.
+
+`8080` in an example is only a placeholder: use a port where your target actually serves HTTP. `curl -v --fail-with-body` helps expose proxy status codes and error bodies; ordinary curl can exit successfully after receiving an HTTP 502 response.
+
+```sh
+wg-cli curl -v --fail-with-body http://10.65.3.3:8080/
+```
+
 ## Process lifecycle
 
 Child exit statuses are preserved. A missing command returns 127; an unexecutable command returns 126; tool errors return 1; usage errors return 2. INT, TERM, and HUP are forwarded to the direct child, which is forcibly terminated after three seconds if needed, then the tunnel is cleaned up.

@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-const version = "0.3.0"
+const version = "0.3.1"
 
 func defaultConfigPath(executable, override string) string {
 	if override != "" {
@@ -126,7 +126,7 @@ func run(args []string, stderr io.Writer) int {
 		}
 		return 0
 	}
-	url, closeProxy, err := startProxy(dial)
+	url, closeProxy, err := startProxyWithErrors(dial, stderr)
 	if err != nil {
 		fmt.Fprintln(stderr, "wg-cli:", err)
 		return 1
